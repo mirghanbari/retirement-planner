@@ -22,6 +22,9 @@ Then open your browser to **http://localhost:5173**
 ## Other Commands
 
 ```bash
+# Run the financial-model tests
+npm test
+
 # Build for production (creates a /dist folder you can host anywhere)
 npm run build
 
@@ -44,10 +47,11 @@ Four interactive tabs, all driven by real-time sliders:
 |---|---|
 | Cash / Savings | $400,000 |
 | 401(k) | $265,000 |
-| Home Equity | $175,000 |
 | Monthly Savings | $5,000 |
 | Home Value | ~$805,000 |
 | Mortgage | $630,000 @ 5.5% |
+
+Home equity is derived from Home Value − Mortgage Balance as both evolve year over year.
 
 ## Destinations Modeled
 

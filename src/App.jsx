@@ -1,4 +1,13 @@
 import { useState, useMemo } from "react";
+import {
+  calculate,
+  MORTGAGE_RATE,
+  MGMT_FEE_RATE,
+  FURNISHED_PREMIUM,
+  RELOCATION_FEE,
+  INSURANCE_MONTHLY,
+  MAINTENANCE_RATE,
+} from "./model.js";
 
 const formatCurrency = (n) =>
   new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(n);
@@ -19,7 +28,7 @@ const Slider = ({ label, value, min, max, step, onChange, format, hint }) => {
   const [inputVal, setInputVal] = useState('');
 
   const commit = (raw) => {
-    const n = parseFloat(raw.replace(/[^0-9.\-]/g, ''));
+    const n = parseFloat(raw.replace(/[^0-9.-]/g, ''));
     if (!isNaN(n)) onChange(Math.min(Math.max(n, min), max));
     setEditing(false);
   };
@@ -120,7 +129,6 @@ export default function LifePlanCalc() {
   // Inputs
   const [cash, setCash] = useState(400000);
   const [k401, setK401] = useState(265000);
-  const [equity, setEquity] = useState(175000);
   const [monthlySavings, setMonthlySavings] = useState(5000);
   const [homeValue, setHomeValue] = useState(805000);
   const [mortgage, setMortgage] = useState(630000);
@@ -138,121 +146,18 @@ export default function LifePlanCalc() {
   const [k401Accessible, setK401Accessible] = useState(false);
   const [tab, setTab] = useState("overview");
 
-  const calc = useMemo(() => {
-    const annualSavings = monthlySavings * 12;
-    const r = cashReturn / 100;
-    const rk = kReturn / 100;
-    const ra = homeAppreciation / 100;
+  const calc = useMemo(() => calculate({
+    cash, k401, monthlySavings, homeValue, mortgage, piti, cashReturn, kReturn,
+    homeAppreciation, rentalGross, furnishedPremium, clientIncome, withdrawalRate,
+    overseasHome, years, k401Accessible,
+  }), [cash, k401, monthlySavings, homeValue, mortgage, piti, cashReturn, kReturn,
+    homeAppreciation, rentalGross, furnishedPremium, clientIncome, withdrawalRate,
+    overseasHome, years, k401Accessible]);
 
-    // Year-by-year
-    const yearData = [];
-    let cashBal = cash;
-    let savingsBal = 0;
-    let k401Bal = k401;
-    let homeBal = homeValue;
-    let mortgageBal = mortgage;
-
-    // Principal paydown per year (approx, 5.5% on ~630k)
-    const monthlyRate = 5.5 / 100 / 12;
-    // Approximate principal paid per year
-    const getPrincipalPaid = (bal) => {
-      const monthlyPayment = bal * (monthlyRate * Math.pow(1 + monthlyRate, 360)) / (Math.pow(1 + monthlyRate, 360) - 1);
-      let principal = 0;
-      for (let m = 0; m < 12; m++) {
-        const interest = bal * monthlyRate;
-        const p = monthlyPayment - interest;
-        principal += p;
-        bal -= p;
-      }
-      return principal;
-    };
-
-    for (let y = 1; y <= 10; y++) {
-      cashBal = cashBal * (1 + r) + annualSavings * (1 + r / 2);
-      k401Bal = k401Bal * (1 + rk);
-      homeBal = homeBal * (1 + ra);
-      const principalPaid = getPrincipalPaid(mortgageBal);
-      mortgageBal = Math.max(mortgageBal - principalPaid, 0);
-      savingsBal = savingsBal * (1 + r) + annualSavings;
-
-      const homeEquity = homeBal - mortgageBal;
-      const liquidInvestable = cashBal;
-      const totalInvestable = liquidInvestable + (k401Accessible ? k401Bal : 0);
-
-      // Rental
-      const mgmtFee = furnishedPremium ? 0 : rentalGross * 0.09;
-      const maintenance = homeBal * 0.01 / 12;
-      const insurance = 900;
-      const netRental = rentalGross - mgmtFee - maintenance - insurance - piti;
-
-      const investmentIncome = (totalInvestable * withdrawalRate / 100) / 12;
-      const totalMonthly = investmentIncome + Math.max(netRental, 0) + clientIncome;
-
-      yearData.push({
-        year: y,
-        cashBal,
-        k401Bal,
-        homeBal,
-        mortgageBal,
-        homeEquity,
-        liquidInvestable,
-        totalInvestable: totalInvestable + k401Bal, // always show total
-        netRental,
-        investmentIncome,
-        totalMonthly,
-      });
-    }
-
-    const target = yearData[years - 1];
-
-    // After buying overseas home
-    const overseasFunded = target.homeEquity >= overseasHome;
-    const remainingPortfolio = target.liquidInvestable - (overseasFunded ? 0 : overseasHome);
-    const accessibleTotal = remainingPortfolio + (k401Accessible ? target.k401Bal : 0);
-    const finalInvestmentIncome = (accessibleTotal * withdrawalRate / 100) / 12;
-
-    const mgmtFee = furnishedPremium ? 0 : rentalGross * 0.09;
-    const maintenance = target.homeBal * 0.01 / 12;
-    const insurance = 900;
-    const netRental = rentalGross - mgmtFee - maintenance - insurance - piti;
-
-    const scenarioA = {
-      name: "Conservative",
-      desc: "Long-term unfurnished, no 401k, no clients",
-      investment: (target.liquidInvestable * withdrawalRate / 100) / 12,
-      rental: netRental,
-      client: 0,
-    };
-    scenarioA.total = scenarioA.investment + Math.max(scenarioA.rental, 0);
-
-    const scenarioB = {
-      name: "Moderate",
-      desc: "Furnished/corporate lease, 1 client",
-      investment: (target.liquidInvestable * withdrawalRate / 100) / 12,
-      rental: rentalGross - maintenance - insurance - piti,
-      client: clientIncome,
-    };
-    scenarioB.total = scenarioB.investment + Math.max(scenarioB.rental, 0) + scenarioB.client;
-
-    const scenarioC = {
-      name: "Optimal",
-      desc: "401k accessible, furnished, 1–2 clients",
-      investment: ((target.liquidInvestable + target.k401Bal) * withdrawalRate / 100) / 12,
-      rental: rentalGross - maintenance - insurance - piti + 300,
-      client: clientIncome,
-    };
-    scenarioC.total = scenarioC.investment + Math.max(scenarioC.rental, 0) + scenarioC.client;
-
-    const shortfall = targetMonthly - scenarioB.total;
-
-    return { yearData, scenarioA, scenarioB, scenarioC, target, shortfall, netRental };
-  }, [cash, k401, monthlySavings, homeValue, mortgage, piti, cashReturn, kReturn, homeAppreciation,
-    rentalGross, furnishedPremium, clientIncome, withdrawalRate, overseasHome, targetMonthly, years, k401Accessible, equity]);
-
-  const maxBar = Math.max(...calc.yearData.map(d => d.totalInvestable)) * 1.1;
-  const target = calc.yearData[years - 1];
+  const targetPortfolio = targetMonthly * 12 / (withdrawalRate / 100);
+  const maxBar = Math.max(...calc.yearData.map(d => d.liquidInvestable), targetPortfolio) * 1.1;
+  const target = calc.target;
   const scenarios = [calc.scenarioA, calc.scenarioB, calc.scenarioC];
-  const scenarioColors = ["#60a5fa", "#a78bfa", "#4ade80"];
 
   return (
     <>
@@ -849,8 +754,6 @@ export default function LifePlanCalc() {
               onChange={setCash} format={formatK} />
             <Slider label="401(k) Balance" value={k401} min={50000} max={600000} step={500}
               onChange={setK401} format={formatK} />
-            <Slider label="Home Equity" value={equity} min={50000} max={500000} step={500}
-              onChange={setEquity} format={formatK} hint="Implied home value ~$805k" />
             <Slider label="Monthly Savings" value={monthlySavings} min={1000} max={12000} step={50}
               onChange={setMonthlySavings} format={(v) => `${formatK(v)}/mo`} />
 
@@ -859,7 +762,7 @@ export default function LifePlanCalc() {
             <Slider label="Current Home Value" value={homeValue} min={600000} max={1500000} step={1000}
               onChange={setHomeValue} format={formatK} />
             <Slider label="Mortgage Balance" value={mortgage} min={400000} max={900000} step={500}
-              onChange={setMortgage} format={formatK} hint="Fixed at 5.5% per plan" />
+              onChange={setMortgage} format={formatK} hint={`Fixed at ${MORTGAGE_RATE}% per plan`} />
             <Slider label="PITI Payment" value={piti} min={3000} max={7000} step={10}
               onChange={setPiti} format={(v) => `${formatK(v)}/mo`} />
             <Slider label="Home Appreciation" value={homeAppreciation} min={0} max={6} step={0.05}
@@ -923,7 +826,7 @@ export default function LifePlanCalc() {
                     label="401(k) Value" color="#a78bfa" />
                   <GaugeMeter value={target.homeEquity} min={0} max={600000}
                     label="Home Equity" color="#f59e0b" />
-                  <GaugeMeter value={calc.scenarioB.total} min={0} max={12000}
+                  <GaugeMeter value={calc.plan.total} min={0} max={12000}
                     label="Monthly Income" color="#4ade80" />
                 </div>
 
@@ -950,10 +853,10 @@ export default function LifePlanCalc() {
                   </div>
                 </div>
 
-                <div className={`shortfall-bar ${calc.scenarioB.total >= targetMonthly ? "hit" : "miss"}`}>
-                  {calc.scenarioB.total >= targetMonthly
-                    ? `✅ Moderate scenario hits your ${formatK(targetMonthly)}/mo target — generating ${formatK(calc.scenarioB.total)}/mo (+${formatK(calc.scenarioB.total - targetMonthly)} buffer).`
-                    : `⚠️ Moderate scenario generates ${formatK(calc.scenarioB.total)}/mo — ${formatK(targetMonthly - calc.scenarioB.total)}/mo short of your ${formatK(targetMonthly)}/mo target. Adjust sliders or add client income.`}
+                <div className={`shortfall-bar ${calc.plan.total >= targetMonthly ? "hit" : "miss"}`}>
+                  {calc.plan.total >= targetMonthly
+                    ? `✅ Your plan hits your ${formatK(targetMonthly)}/mo target — generating ${formatK(calc.plan.total)}/mo (+${formatK(calc.plan.total - targetMonthly)} buffer).`
+                    : `⚠️ Your plan generates ${formatK(calc.plan.total)}/mo — ${formatK(targetMonthly - calc.plan.total)}/mo short of your ${formatK(targetMonthly)}/mo target. Adjust sliders or add client income.`}
                 </div>
 
                 <div className="insight">
@@ -970,7 +873,6 @@ export default function LifePlanCalc() {
               <>
                 <div className="scenarios">
                   {scenarios.map((s, i) => {
-                    const color = scenarioColors[i];
                     const cls = s.total >= targetMonthly ? "hit" : s.total >= targetMonthly * 0.85 ? "close" : "miss";
                     return (
                       <div key={i} className={`scenario-card ${s.total >= targetMonthly ? "winner" : ""}`}>
@@ -1022,12 +924,12 @@ export default function LifePlanCalc() {
                   <div className="rental-grid">
                     {[
                       ["Gross Rent", formatK(rentalGross) + "/mo", "neutral"],
-                      ["Mgmt Fee (9%)", "-" + formatK(rentalGross * 0.09) + "/mo", "neg"],
-                      ["Maintenance Reserve", "-" + formatK(target.homeBal * 0.01 / 12) + "/mo", "neg"],
-                      ["Insurance + Prop Tax", "-$900/mo", "neg"],
-                      ["PITI (5.5%)", "-" + formatK(piti) + "/mo", "neg"],
-                      ["Net Cash Flow", formatK(rentalGross - rentalGross * 0.09 - target.homeBal * 0.01 / 12 - 900 - piti) + "/mo",
-                        rentalGross - rentalGross * 0.09 - target.homeBal * 0.01 / 12 - 900 - piti >= 0 ? "pos" : "neg"],
+                      [`Mgmt Fee (${MGMT_FEE_RATE * 100}%)`, "-" + formatK(rentalGross * MGMT_FEE_RATE) + "/mo", "neg"],
+                      ["Maintenance Reserve", "-" + formatK(target.homeBal * MAINTENANCE_RATE / 12) + "/mo", "neg"],
+                      ["Insurance + Prop Tax", "-" + formatK(INSURANCE_MONTHLY) + "/mo", "neg"],
+                      [`PITI (${MORTGAGE_RATE}%)`, "-" + formatK(piti) + "/mo", "neg"],
+                      ["Net Cash Flow", formatK(calc.scenarioA.rental) + "/mo",
+                        calc.scenarioA.rental >= 0 ? "pos" : "neg"],
                     ].map(([label, value, cls]) => (
                       <div key={label} className="rental-item">
                         <div className="rental-item-label">{label}</div>
@@ -1042,13 +944,13 @@ export default function LifePlanCalc() {
                   <div className="rental-subtitle">Amazon / Microsoft / Boeing exec relocation — no mgmt fee, premium pricing</div>
                   <div className="rental-grid">
                     {[
-                      ["Furnished Gross Rent", formatK(rentalGross + 800) + "/mo", "neutral"],
-                      ["Relocation Agency (one-time)", "-$600/mo est.", "neg"],
-                      ["Maintenance Reserve", "-" + formatK(target.homeBal * 0.01 / 12) + "/mo", "neg"],
-                      ["Insurance + Prop Tax", "-$900/mo", "neg"],
-                      ["PITI (5.5%)", "-" + formatK(piti) + "/mo", "neg"],
-                      ["Net Cash Flow", formatK(rentalGross + 800 - 600 - target.homeBal * 0.01 / 12 - 900 - piti) + "/mo",
-                        rentalGross + 800 - 600 - target.homeBal * 0.01 / 12 - 900 - piti >= 0 ? "pos" : "neg"],
+                      ["Furnished Gross Rent", formatK(rentalGross + FURNISHED_PREMIUM) + "/mo", "neutral"],
+                      ["Relocation Agency (amortized)", "-" + formatK(RELOCATION_FEE) + "/mo est.", "neg"],
+                      ["Maintenance Reserve", "-" + formatK(target.homeBal * MAINTENANCE_RATE / 12) + "/mo", "neg"],
+                      ["Insurance + Prop Tax", "-" + formatK(INSURANCE_MONTHLY) + "/mo", "neg"],
+                      [`PITI (${MORTGAGE_RATE}%)`, "-" + formatK(piti) + "/mo", "neg"],
+                      ["Net Cash Flow", formatK(calc.scenarioB.rental) + "/mo",
+                        calc.scenarioB.rental >= 0 ? "pos" : "neg"],
                     ].map(([label, value, cls]) => (
                       <div key={label} className="rental-item">
                         <div className="rental-item-label">{label}</div>
@@ -1059,11 +961,11 @@ export default function LifePlanCalc() {
                 </div>
 
                 <div className="insight">
-                  <strong>Hidden wealth builder:</strong> Even at cash-flow breakeven, your tenants pay ~{formatK(1200)}/mo in principal on your behalf, and the home appreciates ~{formatK(homeValue * homeAppreciation / 100 / 12)}/mo. That's {formatK(1200 + homeValue * homeAppreciation / 100 / 12)}/mo in wealth creation that never touches your P&L — the real reason to hold.
+                  <strong>Hidden wealth builder:</strong> Even at cash-flow breakeven, your tenants pay ~{formatK(target.principalPaid / 12)}/mo in principal on your behalf (year {years}), and the home appreciates ~{formatK(target.homeBal * homeAppreciation / 100 / 12)}/mo. That's {formatK(target.principalPaid / 12 + target.homeBal * homeAppreciation / 100 / 12)}/mo in wealth creation that never touches your P&L — the real reason to hold.
                 </div>
 
                 <div className="insight">
-                  <strong>View premium is real:</strong> Tri-view properties (Sound + Olympics + Rainier) in West Seattle command a documented 15–25% rent premium over comparable non-view townhomes. At the high end of the Seattle corporate relocation market, your asking rent of {formatK(rentalGross + 800)}/mo is firmly defensible. Lead with all three views and the walk score in every listing.
+                  <strong>View premium is real:</strong> Tri-view properties (Sound + Olympics + Rainier) in West Seattle command a documented 15–25% rent premium over comparable non-view townhomes. At the high end of the Seattle corporate relocation market, your asking rent of {formatK(rentalGross + FURNISHED_PREMIUM)}/mo is firmly defensible. Lead with all three views and the walk score in every listing.
                 </div>
               </>
             )}
@@ -1071,10 +973,10 @@ export default function LifePlanCalc() {
             {tab === "growth" && (
               <>
                 <div className="year-bars">
-                  <div className="year-bars-title">Liquid Portfolio Growth (10 Years) — Target: {formatK(targetMonthly * 12 / (withdrawalRate / 100))}</div>
+                  <div className="year-bars-title">Liquid Portfolio Growth (10 Years) — Target: {formatK(targetPortfolio)}</div>
                   {calc.yearData.map(d => (
                     <YearBar key={d.year} year={d.year} value={d.liquidInvestable}
-                      max={maxBar} target={targetMonthly * 12 / (withdrawalRate / 100)} />
+                      max={maxBar} target={targetPortfolio} />
                   ))}
                   <div style={{ fontSize: "0.62rem", color: "#475569", marginTop: 10 }}>
                     Yellow line = portfolio size needed to generate {formatK(targetMonthly)}/mo at {withdrawalRate}% withdrawal rate · Green bars = target reached
@@ -1095,7 +997,7 @@ export default function LifePlanCalc() {
                   <strong>Departure year {years}:</strong> Liquid portfolio {formatK(target.liquidInvestable)} · 401(k) {formatK(target.k401Bal)} · Home equity {formatK(target.homeEquity)} · Total net worth {formatK(target.liquidInvestable + target.k401Bal + target.homeEquity)}.
                 </div>
                 <div className="insight">
-                  <strong>Overseas home funding:</strong> Your {years}-year home equity of {formatK(target.homeEquity)} {target.homeEquity >= overseasHome ? `fully covers your ${formatK(overseasHome)} overseas home budget — you can buy outright without touching your investment portfolio.` : `doesn't fully cover your ${formatK(overseasHome)} overseas budget. The ${formatK(overseasHome - target.homeEquity)} gap can be funded from your liquid portfolio, leaving ${formatK(target.liquidInvestable - (overseasHome - target.homeEquity))} invested.`}
+                  <strong>Overseas home funding:</strong> Your {years}-year home equity of {formatK(target.homeEquity)} {calc.overseasGap === 0 ? `fully covers your ${formatK(overseasHome)} overseas home budget — you can buy outright without touching your investment portfolio.` : `doesn't fully cover your ${formatK(overseasHome)} overseas budget. The ${formatK(calc.overseasGap)} gap is funded from your liquid portfolio, leaving ${formatK(calc.investablePool)} invested — the scenario incomes already reflect this.`}
                 </div>
               </>
             )}
