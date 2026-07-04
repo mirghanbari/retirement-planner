@@ -96,13 +96,16 @@ const GaugeMeter = ({ value, min, max, label, color }) => {
 
   return (
     <div className="gauge-wrap">
-      <svg width="140" height="122" viewBox="0 0 140 122">
+      <svg className="gauge-svg" viewBox="5 5 130 114" role="img"
+        aria-label={`${label}: ${formatK(value)}`}>
         <path d={trackPath} fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth="10" strokeLinecap="round" />
         <path d={fillPath} fill="none" stroke={color} strokeWidth="10" strokeLinecap="round" />
         <line x1={cx} y1={cy} x2={needleX} y2={needleY} stroke="white" strokeWidth="2" strokeLinecap="round" />
         <circle cx={cx} cy={cy} r="4" fill="white" />
+        <text className="gauge-value" x={cx} y={cy + 44} textAnchor="middle" fill={color}>
+          {formatK(value)}
+        </text>
       </svg>
-      <div className="gauge-value" style={{ color }}>{formatK(value)}</div>
       <div className="gauge-label">{label}</div>
     </div>
   );
@@ -421,7 +424,7 @@ export default function LifePlanCalc() {
 
         .gauge-wrap {
           flex: 1;
-          min-width: 130px;
+          min-width: 150px;
           padding: 20px 16px;
           display: flex;
           flex-direction: column;
@@ -431,10 +434,16 @@ export default function LifePlanCalc() {
 
         .gauge-wrap:last-child { border-right: none; }
 
+        .gauge-svg {
+          display: block;
+          width: 100%;
+          max-width: 180px;
+          height: auto;
+        }
+
         .gauge-value {
-          font-size: 1.1rem;
+          font-size: 11px;
           font-weight: 500;
-          margin-top: -8px;
         }
 
         .gauge-label {
@@ -442,7 +451,7 @@ export default function LifePlanCalc() {
           color: #64748b;
           text-transform: uppercase;
           letter-spacing: 0.1em;
-          margin-top: 4px;
+          margin-top: 8px;
           text-align: center;
         }
 
@@ -732,7 +741,7 @@ export default function LifePlanCalc() {
           .layout { grid-template-columns: 1fr; }
           .sidebar { border-right: none; border-bottom: 1px solid rgba(255,255,255,0.06); }
           .scenarios { grid-template-columns: 1fr; }
-          .gauges { flex-direction: column; }
+          .gauge-wrap { min-width: 40%; }
         }
       `}</style>
 
