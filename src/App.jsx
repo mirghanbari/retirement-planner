@@ -7,6 +7,7 @@ import {
   RELOCATION_FEE,
   INSURANCE_MONTHLY,
   MAINTENANCE_RATE,
+  SELLING_COST_RATE,
 } from "./model.js";
 
 const formatCurrency = (n) =>
@@ -147,15 +148,16 @@ export default function LifePlanCalc() {
   const [targetMonthly, setTargetMonthly] = useState(5500);
   const [years, setYears] = useState(5);
   const [k401Accessible, setK401Accessible] = useState(false);
+  const [sellHome, setSellHome] = useState(false);
   const [tab, setTab] = useState("overview");
 
   const calc = useMemo(() => calculate({
     cash, k401, monthlySavings, homeValue, mortgage, piti, cashReturn, kReturn,
     homeAppreciation, rentalGross, furnishedPremium, clientIncome, withdrawalRate,
-    overseasHome, years, k401Accessible,
+    overseasHome, years, k401Accessible, sellHome,
   }), [cash, k401, monthlySavings, homeValue, mortgage, piti, cashReturn, kReturn,
     homeAppreciation, rentalGross, furnishedPremium, clientIncome, withdrawalRate,
-    overseasHome, years, k401Accessible]);
+    overseasHome, years, k401Accessible, sellHome]);
 
   const targetPortfolio = targetMonthly * 12 / (withdrawalRate / 100);
   const maxBar = Math.max(...calc.yearData.map(d => d.liquidInvestable), targetPortfolio) * 1.1;
@@ -792,6 +794,12 @@ export default function LifePlanCalc() {
 
             <Slider label="Overseas Home Budget" value={overseasHome} min={80000} max={350000} step={500}
               onChange={setOverseasHome} format={formatK} />
+
+            <div className="toggle-row">
+              <span className="toggle-label">Sell Home at Departure</span>
+              <button className={`toggle ${sellHome ? "on" : ""}`}
+                onClick={() => setSellHome(!sellHome)} />
+            </div>
             <Slider label="Client Income" value={clientIncome} min={0} max={5000} step={25}
               onChange={setClientIncome} format={(v) => `${formatK(v)}/mo`} />
             <Slider label="Target Monthly Income" value={targetMonthly} min={3000} max={9000} step={25}
@@ -853,7 +861,11 @@ export default function LifePlanCalc() {
                   <div className="summary-card">
                     <div className="summary-card-label">Home Value at Yr {years}</div>
                     <div className="summary-card-value">{formatK(target.homeBal)}</div>
-                    <div className="summary-card-sub">Mortgage: {formatK(target.mortgageBal)} remaining</div>
+                    <div className="summary-card-sub">
+                      {sellHome
+                        ? `Sale nets ~${formatK(calc.saleProceeds)} after ${SELLING_COST_RATE * 100}% costs`
+                        : `Mortgage: ${formatK(target.mortgageBal)} remaining`}
+                    </div>
                   </div>
                   <div className="summary-card">
                     <div className="summary-card-label">Monthly Savings Contribution</div>
@@ -915,18 +927,31 @@ export default function LifePlanCalc() {
                   })}
                 </div>
 
-                <div className="insight">
-                  <strong>Scenario B is your baseline plan.</strong> One furnished corporate lease + one retained client + your invested portfolio hits the target with margin. You don't need everything to go perfectly — just two of the three income streams performing.
-                </div>
+                {sellHome ? (
+                  <div className="insight">
+                    <strong>Sale-funded portfolio.</strong> With the home sold, all three scenarios draw on the same {formatK(calc.investablePool)} pool — the spread between them comes entirely from client income and 401(k) access. There's no rental income to manage, and no landlord risk, but also no tenant paying down principal for you.
+                  </div>
+                ) : (
+                  <>
+                    <div className="insight">
+                      <strong>Scenario B is your baseline plan.</strong> One furnished corporate lease + one retained client + your invested portfolio. You don't need everything to go perfectly — just two of the three income streams performing.
+                    </div>
 
-                <div className="insight">
-                  <strong>Sensitivity check:</strong> If rental stays unfurnished and you get no clients (Scenario A), you'd need to draw {formatK(targetMonthly - calc.scenarioA.total)}/mo more from your portfolio. At {withdrawalRate}% that requires an additional {formatK(((targetMonthly - calc.scenarioA.total) * 12) / (withdrawalRate / 100))} in invested assets — achievable only if you save more aggressively or delay departure.
-                </div>
+                    <div className="insight">
+                      <strong>Sensitivity check:</strong> If rental stays unfurnished and you get no clients (Scenario A), you'd need to draw {formatK(targetMonthly - calc.scenarioA.total)}/mo more from your portfolio. At {withdrawalRate}% that requires an additional {formatK(((targetMonthly - calc.scenarioA.total) * 12) / (withdrawalRate / 100))} in invested assets — achievable only if you save more aggressively or delay departure.
+                    </div>
+                  </>
+                )}
               </>
             )}
 
             {tab === "rental" && (
               <>
+                {sellHome && (
+                  <div className="insight">
+                    <strong>Heads up:</strong> Your plan is set to sell the home at departure, so the rental analysis below isn't feeding your income numbers. Flip "Sell Home at Departure" off to put rental income back into the plan.
+                  </div>
+                )}
                 <div className="rental-card">
                   <div className="rental-title">Unfurnished Long-Term Lease</div>
                   <div className="rental-subtitle">Standard 12-month lease, professional property management</div>
@@ -1006,7 +1031,11 @@ export default function LifePlanCalc() {
                   <strong>Departure year {years}:</strong> Liquid portfolio {formatK(target.liquidInvestable)} · 401(k) {formatK(target.k401Bal)} · Home equity {formatK(target.homeEquity)} · Total net worth {formatK(target.liquidInvestable + target.k401Bal + target.homeEquity)}.
                 </div>
                 <div className="insight">
-                  <strong>Overseas home funding:</strong> Your {years}-year home equity of {formatK(target.homeEquity)} {calc.overseasGap === 0 ? `fully covers your ${formatK(overseasHome)} overseas home budget — you can buy outright without touching your investment portfolio.` : `doesn't fully cover your ${formatK(overseasHome)} overseas budget. The ${formatK(calc.overseasGap)} gap is funded from your liquid portfolio, leaving ${formatK(calc.investablePool)} invested — the scenario incomes already reflect this.`}
+                  <strong>Overseas home funding:</strong> {sellHome
+                    ? `Selling at year ${years} nets ~${formatK(calc.saleProceeds)} after ${SELLING_COST_RATE * 100}% selling costs. ${calc.saleProceeds >= overseasHome
+                      ? `That alone covers your ${formatK(overseasHome)} overseas budget, leaving ${formatK(calc.investablePool)} invested.`
+                      : `The remaining ${formatK(overseasHome - calc.saleProceeds)} of your ${formatK(overseasHome)} budget comes from the portfolio, leaving ${formatK(calc.investablePool)} invested.`}`
+                    : `You're keeping the home as a rental, so its ${formatK(target.homeEquity)} equity stays locked in the house. The full ${formatK(overseasHome)} purchase comes from your liquid portfolio, leaving ${formatK(calc.investablePool)} invested — the income numbers already reflect this.`}
                 </div>
               </>
             )}

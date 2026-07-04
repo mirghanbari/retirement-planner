@@ -8,6 +8,7 @@ import {
   RELOCATION_FEE,
   INSURANCE_MONTHLY,
   MAINTENANCE_RATE,
+  SELLING_COST_RATE,
   PROJECTION_YEARS,
 } from "./model.js";
 
@@ -29,6 +30,7 @@ const base = {
   overseasHome: 200000,
   years: 5,
   k401Accessible: false,
+  sellHome: false,
 };
 
 describe("projection basics", () => {
@@ -193,30 +195,43 @@ describe("negative rental cash flow", () => {
   });
 });
 
-describe("overseas home purchase", () => {
-  it("doesn't touch the portfolio when home equity covers the budget", () => {
-    const calc = calculate(base); // equity at yr 5 ≈ $330k > $200k budget
-    expect(calc.overseasGap).toBe(0);
-    expect(calc.investablePool).toBe(calc.target.liquidInvestable);
-  });
-
-  it("funds only the gap beyond home equity from the liquid portfolio", () => {
-    const calc = calculate({ ...base, overseasHome: 350000, years: 2 });
-    const expectedGap = 350000 - calc.target.homeEquity;
-    expect(expectedGap).toBeGreaterThan(0);
-    expect(calc.overseasGap).toBeCloseTo(expectedGap, 6);
-    expect(calc.investablePool).toBeCloseTo(calc.target.liquidInvestable - expectedGap, 6);
-  });
-
-  it("reduces scenario investment income when a gap exists", () => {
-    const noGap = calculate(base);
-    const withGap = calculate({ ...base, overseasHome: 350000, years: 2 });
-    const drawOnFullPool =
-      (withGap.target.liquidInvestable * base.withdrawalRate) / 100 / 12;
-    expect(withGap.scenarioB.investment).toBeLessThan(drawOnFullPool);
-    expect(noGap.scenarioB.investment).toBeCloseTo(
-      (noGap.target.liquidInvestable * base.withdrawalRate) / 100 / 12,
+describe("departure strategy: sell vs keep the home", () => {
+  it("keep mode: equity stays locked, the full overseas budget comes from the portfolio", () => {
+    const calc = calculate(base); // sellHome: false
+    expect(calc.investablePool).toBeCloseTo(
+      calc.target.liquidInvestable - base.overseasHome,
       6
     );
+  });
+
+  it("sell mode: sale proceeds net of selling costs join the pool", () => {
+    const calc = calculate({ ...base, sellHome: true });
+    expect(calc.saleProceeds).toBeCloseTo(
+      calc.target.homeEquity * (1 - SELLING_COST_RATE),
+      6
+    );
+    expect(calc.investablePool).toBeCloseTo(
+      calc.target.liquidInvestable + calc.saleProceeds - base.overseasHome,
+      6
+    );
+  });
+
+  it("sell mode zeroes rental income in the plan and every scenario", () => {
+    const calc = calculate({ ...base, sellHome: true, furnishedPremium: true });
+    expect(calc.plan.rental).toBe(0);
+    expect(calc.scenarioA.rental).toBe(0);
+    expect(calc.scenarioB.rental).toBe(0);
+    expect(calc.scenarioC.rental).toBe(0);
+  });
+
+  it("selling beats keeping at default inputs (negative rental + unlocked equity)", () => {
+    const keep = calculate(base);
+    const sell = calculate({ ...base, sellHome: true });
+    expect(sell.plan.total).toBeGreaterThan(keep.plan.total);
+  });
+
+  it("the pool never goes negative when the budget exceeds available funds", () => {
+    const calc = calculate({ ...base, cash: 100000, overseasHome: 350000, years: 2 });
+    expect(calc.investablePool).toBeGreaterThanOrEqual(0);
   });
 });

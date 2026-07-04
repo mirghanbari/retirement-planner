@@ -7,6 +7,7 @@ export const MAINTENANCE_RATE = 0.01; // fraction of home value per year
 export const MGMT_FEE_RATE = 0.09; // long-term property management, fraction of gross rent
 export const FURNISHED_PREMIUM = 800; // $/mo over unfurnished gross rent
 export const RELOCATION_FEE = 600; // $/mo amortized relocation-agency cost
+export const SELLING_COST_RATE = 0.06; // realtor + closing costs on a home sale
 export const PROJECTION_YEARS = 10;
 
 export const monthlyPayment = (principal, annualRatePct, months = MORTGAGE_TERM_MONTHS) => {
@@ -31,6 +32,7 @@ export function calculate({
   overseasHome,
   years,
   k401Accessible,
+  sellHome,
 }) {
   const annualSavings = monthlySavings * 12;
   const r = cashReturn / 100;
@@ -89,36 +91,39 @@ export function calculate({
 
   const target = yearData[years - 1];
 
-  // The house stays as a rental, so its equity can't be spent directly; whatever
-  // the overseas budget exceeds it by is drawn from the liquid portfolio.
-  const overseasGap = Math.max(overseasHome - target.homeEquity, 0);
-  const investablePool = Math.max(target.liquidInvestable - overseasGap, 0);
+  // Departure strategy. Selling converts equity to cash (net of selling costs) and
+  // forfeits rental income; keeping leaves the equity locked in the house, so the
+  // overseas purchase comes entirely out of the liquid portfolio.
+  const saleProceeds = target.homeEquity * (1 - SELLING_COST_RATE);
+  const spendable = target.liquidInvestable + (sellHome ? saleProceeds : 0);
+  const investablePool = Math.max(spendable - overseasHome, 0);
 
   const draw = (pool) => (pool * withdrawalRate) / 100 / 12;
+  const rentalFor = (furnished) => (sellHome ? 0 : netRentalAt(target.homeBal, furnished));
 
   const scenarioA = {
     name: "Conservative",
-    desc: "Long-term unfurnished, no 401k, no clients",
+    desc: sellHome ? "Home sold, portfolio income only, no clients" : "Long-term unfurnished, no 401k, no clients",
     investment: draw(investablePool),
-    rental: netRentalAt(target.homeBal, false),
+    rental: rentalFor(false),
     client: 0,
   };
   scenarioA.total = scenarioA.investment + scenarioA.rental;
 
   const scenarioB = {
     name: "Moderate",
-    desc: "Furnished/corporate lease, 1 client",
+    desc: sellHome ? "Home sold, 1 client retained" : "Furnished/corporate lease, 1 client",
     investment: draw(investablePool),
-    rental: netRentalAt(target.homeBal, true),
+    rental: rentalFor(true),
     client: clientIncome,
   };
   scenarioB.total = scenarioB.investment + scenarioB.rental + scenarioB.client;
 
   const scenarioC = {
     name: "Optimal",
-    desc: "401k accessible, furnished, 1–2 clients",
+    desc: sellHome ? "Home sold, 401k accessible, 1–2 clients" : "401k accessible, furnished, 1–2 clients",
     investment: draw(investablePool + target.k401Bal),
-    rental: netRentalAt(target.homeBal, true),
+    rental: rentalFor(true),
     client: clientIncome,
   };
   scenarioC.total = scenarioC.investment + scenarioC.rental + scenarioC.client;
@@ -126,10 +131,10 @@ export function calculate({
   // The user's own plan: follows the sidebar toggles, unlike the fixed scenario archetypes.
   const plan = {
     investment: draw(investablePool + (k401Accessible ? target.k401Bal : 0)),
-    rental: netRentalAt(target.homeBal, furnishedPremium),
+    rental: rentalFor(furnishedPremium),
     client: clientIncome,
   };
   plan.total = plan.investment + plan.rental + plan.client;
 
-  return { yearData, target, scenarioA, scenarioB, scenarioC, plan, overseasGap, investablePool };
+  return { yearData, target, scenarioA, scenarioB, scenarioC, plan, investablePool, saleProceeds };
 }
